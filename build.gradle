@@ -45,8 +45,8 @@ neoForge {
 }
 
 dependencies {
-    // Create 6.x for NeoForge 1.21.1 (dynamic versions so a stale number never breaks the build)
-    implementation("com.simibubi.create:create-1.21.1:6.+:slim") { transitive = false }
+    // Create 6.x for NeoForge 1.21.1 (no 'slim' classifier: it is not published for this version, the main jar is)
+    implementation("com.simibubi.create:create-1.21.1:6.0.11-346") { transitive = false }
     implementation("net.createmod.ponder:Ponder-NeoForge-1.21.1:1.0.+")
     compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-1.21.1:1.0.+")
     runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-1.21.1:1.0.+")

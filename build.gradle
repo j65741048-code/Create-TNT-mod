@@ -5,7 +5,7 @@ plugins {
 
 // Everything is defined inline on purpose (no gradle.properties dependency).
 def modId = 'railnuke'
-version = '1.0.0'
+version = '1.1.0'
 group = 'com.railnuke'
 
 base {

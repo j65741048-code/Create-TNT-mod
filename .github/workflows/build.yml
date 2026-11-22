@@ -26,6 +26,7 @@ jobs:
       - name: Generate project files
         run: |
           set -e
+          exec > >(tee -a build.log) 2>&1
           pip install pillow
           R=src/main/resources
           J=src/main/java/com/railnuke
@@ -1034,9 +1035,29 @@ jobs:
           echo "Project generated:"; find src -type f | sort
 
       - name: Build
-        run: gradle build --no-daemon
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          gradle build --no-daemon --stacktrace 2>&1 | tee -a build.log
 
-      - uses: actions/upload-artifact@v4
+      - name: Collect result (jar + log)
+        if: always()
+        run: |
+          mkdir -p result
+          cp build.log result/build.log 2>/dev/null || echo "no log" > result/build.log
+          cp build/libs/*.jar result/ 2>/dev/null || echo "No jar produced (build failed) - see build.log" > result/NO_JAR.txt
+          rm -f result/*-sources.jar
+          ls -la result
+
+      - name: Upload result zip
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: railnuke
-          path: build/libs/*.jar
+          name: railnuke-result
+          path: result/*
+          if-no-files-found: warn
+
+      - name: Fail job if build failed
+        if: steps.build.outcome == 'failure'
+        run: exit 1

@@ -1,4 +1,4 @@
-name: Build Rail Nuke
+name: Build Rail Nuke 1.1.0
 
 on:
   push:
@@ -57,11 +57,11 @@ jobs:
 
           [[mods]]
           modId="railnuke"
-          version="1.0.0"
+          version="1.1.0"
           displayName="Rail Nuke: Train TNT"
           logoFile="logo.png"
           authors="You"
-          description='''Three TNT blocks that explode into a whole Create railway network with stations, signals, branch loops and AI trains driven by NPC conductors.'''
+          description='''Four TNT blocks that explode into a whole Create railway network with realistic stations, cargo and fluid yards, signals, branch loops, rail yards with phantom-track loop-backs and AI trains driven by NPC conductors.'''
 
           [[dependencies.railnuke]]
           modId="neoforge"
@@ -81,6 +81,13 @@ jobs:
           modId="create"
           type="required"
           versionRange="[6.0.0,)"
+          ordering="AFTER"
+          side="BOTH"
+
+          [[dependencies.railnuke]]
+          modId="railways"
+          type="optional"
+          versionRange="[0,)"
           ordering="AFTER"
           side="BOTH"
           EOF
@@ -121,7 +128,7 @@ jobs:
               d.rectangle([6, 6, 9, 9], fill=col)
               d.rectangle([7, 7, 8, 8], fill=(30, 30, 30, 255))
               return im
-          cols = {'small': (63, 150, 80, 255), 'medium': (60, 110, 190, 255), 'large': (190, 60, 60, 255)}
+          cols = {'small': (63, 150, 80, 255), 'medium': (60, 110, 190, 255), 'large': (190, 60, 60, 255), 'mega': (140, 70, 190, 255)}
           base = 'src/main/resources/assets/railnuke/textures/block/'
           for k, c in cols.items():
               side(c).save(base + 'tnt_' + k + '_side.png')
@@ -139,7 +146,7 @@ jobs:
           rm gen_art.py
 
           # ---------- json assets ----------
-          for t in small medium large; do
+          for t in small medium large mega; do
             cat > $R/assets/railnuke/blockstates/tnt_$t.json <<EOF
           {"variants":{"":{"model":"railnuke:block/tnt_$t"}}}
           EOF
@@ -159,6 +166,7 @@ jobs:
             "block.railnuke.tnt_small": "Rail TNT: Toy Set",
             "block.railnuke.tnt_medium": "Rail TNT: Regional Network",
             "block.railnuke.tnt_large": "Rail TNT: Grand Network",
+            "block.railnuke.tnt_mega": "Rail TNT: Mega Railway Network",
             "entity.railnuke.conductor": "Train Conductor"
           }
           EOF
@@ -171,6 +179,10 @@ jobs:
           EOF
           cat > $R/data/railnuke/recipe/tnt_large.json <<'EOF'
           {"type":"minecraft:crafting_shapeless","category":"misc","ingredients":[{"item":"railnuke:tnt_medium"},{"item":"minecraft:tnt"},{"item":"create:railway_casing"},{"item":"create:track_station"},{"item":"create:track_signal"}],"result":{"id":"railnuke:tnt_large","count":1}}
+          EOF
+
+          cat > $R/data/railnuke/recipe/tnt_mega.json <<'EOF'
+          {"type":"minecraft:crafting_shapeless","category":"misc","ingredients":[{"item":"railnuke:tnt_large"},{"item":"minecraft:tnt"},{"item":"minecraft:tnt"},{"item":"create:railway_casing"},{"item":"create:track_station"},{"item":"create:track_signal"},{"item":"create:precision_mechanism"}],"result":{"id":"railnuke:tnt_mega","count":1}}
           EOF
 
           # ---------- java ----------
@@ -210,9 +222,11 @@ jobs:
               public static final DeferredBlock<RailNukeBlock> SMALL = BLOCKS.register("tnt_small", () -> new RailNukeBlock(props(), 1));
               public static final DeferredBlock<RailNukeBlock> MEDIUM = BLOCKS.register("tnt_medium", () -> new RailNukeBlock(props(), 2));
               public static final DeferredBlock<RailNukeBlock> LARGE = BLOCKS.register("tnt_large", () -> new RailNukeBlock(props(), 3));
+          public static final DeferredBlock<RailNukeBlock> MEGA = BLOCKS.register("tnt_mega", () -> new RailNukeBlock(props(), 4));
               public static final DeferredItem<BlockItem> SMALL_ITEM = ITEMS.registerSimpleBlockItem("tnt_small", SMALL);
               public static final DeferredItem<BlockItem> MEDIUM_ITEM = ITEMS.registerSimpleBlockItem("tnt_medium", MEDIUM);
               public static final DeferredItem<BlockItem> LARGE_ITEM = ITEMS.registerSimpleBlockItem("tnt_large", LARGE);
+          public static final DeferredItem<BlockItem> MEGA_ITEM = ITEMS.registerSimpleBlockItem("tnt_mega", MEGA);
 
               public static final DeferredHolder<EntityType<?>, EntityType<ConductorEntity>> CONDUCTOR = ENTITIES.register("conductor",
                       () -> EntityType.Builder.of(ConductorEntity::new, MobCategory.MISC).sized(0.6f, 1.8f).clientTrackingRange(10).build("conductor"));
@@ -235,6 +249,7 @@ jobs:
                       e.accept(SMALL_ITEM.get());
                       e.accept(MEDIUM_ITEM.get());
                       e.accept(LARGE_ITEM.get());
+                      e.accept(MEGA_ITEM.get());
                   }
               }
           }
@@ -247,11 +262,12 @@ jobs:
 
           public class Config {
               private static final ModConfigSpec.Builder B = new ModConfigSpec.Builder();
-              public static final ModConfigSpec.BooleanValue SPAWN_TRAINS = B.comment("Spawn AI trains built from schematics").define("spawnTrains", true);
+              public static final ModConfigSpec.BooleanValue SPAWN_TRAINS = B.comment("Spawn AI trains built from your Create schematics").define("spawnTrains", true);
               public static final ModConfigSpec.IntValue MIN_CARRIAGES = B.comment("Minimum carriages (locomotive + wagons). A train with fewer is removed").defineInRange("minCarriages", 2, 1, 20);
-              public static final ModConfigSpec.IntValue MAX_CARRIAGES = B.comment("Maximum carriages (locomotive + 5 wagons = 6)").defineInRange("maxCarriages", 6, 1, 20);
-              public static final ModConfigSpec.BooleanValue FLIP_STATION = B.comment("Flip the direction stations/signals face if trains skip them").define("flipStationDirection", false);
-              public static final ModConfigSpec.BooleanValue ASSEMBLE_AHEAD = B.comment("Spawn trains ahead of the station arrow instead of behind it").define("assembleAheadOfStation", false);
+              public static final ModConfigSpec.IntValue MAX_CARRIAGES = B.comment("Maximum carriages. A train with more is removed").defineInRange("maxCarriages", 10, 1, 24);
+              public static final ModConfigSpec.BooleanValue FLIP_STATION = B.comment("Starting guess for the station direction. The mod auto-corrects this by itself if the first train does not assemble").define("flipStationDirection", false);
+              public static final ModConfigSpec.BooleanValue YARD_PHANTOM = B.comment("Mega network: use Steam 'n' Rails phantom tracks for the hidden loop-back of rail yard dead ends (needs the railways mod, otherwise normal tracks are used)").define("usePhantomTracks", true);
+              public static final ModConfigSpec.ConfigValue<String> EXTRA_DIR = B.comment("Optional extra folder that is also searched for train schematics (.nbt). The game's own 'schematics' folder is always searched").define("extraSchematicFolder", "");
               public static final ModConfigSpec.IntValue BUDGET = B.comment("Build work per tick (lower = less lag)").defineInRange("workPerTick", 600, 50, 5000);
               public static final ModConfigSpec SPEC = B.build();
           }
@@ -518,25 +534,47 @@ jobs:
 
               private Schematics() {}
 
+              static Path mainRoot() {
+                  return FMLPaths.GAMEDIR.get().resolve("schematics");
+              }
+
               static List<Info> scan() {
                   List<Info> out = new ArrayList<>();
-                  Path root = FMLPaths.GAMEDIR.get().resolve("schematics");
-                  if (!Files.isDirectory(root)) return out;
-                  try (Stream<Path> w = Files.walk(root, 4)) {
-                      w.filter(p -> p.toString().endsWith(".nbt")).forEach(p -> {
-                          Info i = analyse(p);
-                          if (i != null) out.add(i);
-                      });
+                  List<Path> roots = new ArrayList<>();
+                  roots.add(mainRoot());
+                  try {
+                      String extra = Config.EXTRA_DIR.get();
+                      if (extra != null && !extra.isBlank()) roots.add(Path.of(extra.trim()));
                   } catch (Exception e) {
-                      Jobs.LOG.warn("Rail Nuke: schematic scan failed: {}", e.toString());
+                      Jobs.LOG.warn("Rail Nuke: bad extraSchematicFolder: {}", e.toString());
                   }
+                  for (Path root : roots) {
+                      if (!Files.isDirectory(root)) {
+                          Jobs.LOG.info("Rail Nuke: schematic folder does not exist: {}", root);
+                          continue;
+                      }
+                      try (Stream<Path> w = Files.walk(root, 6)) {
+                          w.filter(p -> p.toString().toLowerCase().endsWith(".nbt")).forEach(p -> {
+                              Info i = analyse(p);
+                              if (i != null) out.add(i);
+                          });
+                      } catch (Exception e) {
+                          Jobs.LOG.warn("Rail Nuke: schematic scan failed: {}", e.toString());
+                      }
+                  }
+                  Jobs.LOG.info("Rail Nuke: {} usable train schematic(s) found", out.size());
                   return out;
+              }
+
+              private static Info skip(Path p, String why) {
+                  Jobs.LOG.info("Rail Nuke: schematic {} skipped: {}", p.getFileName(), why);
+                  return null;
               }
 
               private static Info analyse(Path p) {
                   try (InputStream in = Files.newInputStream(p)) {
                       CompoundTag tag = NbtIo.readCompressed(in, NbtAccounter.unlimitedHeap());
-                      if (!tag.contains("palette", 9) || !tag.contains("blocks", 9)) return null;
+                      if (!tag.contains("palette", 9) || !tag.contains("blocks", 9)) return skip(p, "not a structure/schematic file");
                       ListTag pal = tag.getList("palette", 10);
                       String[] names = new String[pal.size()];
                       for (int i = 0; i < names.length; i++) names[i] = pal.getCompound(i).getString("Name");
@@ -559,9 +597,10 @@ jobs:
                           else if (path.contains("fluid") || path.contains("tank") || path.contains("pump")) fluid++;
                           else if (path.contains("item_vault") || path.contains("item_hatch") || path.contains("cargo") || path.contains("storage_interface")) cargo++;
                       }
-                      // needs controls + bogies + a seat, and enough bogies for at least the minimum number of carriages
-                      if (controls == 0 || seats == 0) return null;
-                      if (bogeys.size() < Math.max(2, Config.MIN_CARRIAGES.get()) || bogeys.size() > Config.MAX_CARRIAGES.get() * 2) return null;
+                      if (bogeys.size() < 2) return skip(p, "needs at least 2 bogeys (found " + bogeys.size() + ")");
+                      if (controls == 0) return skip(p, "no Train Controls block");
+                      if (seats == 0) return skip(p, "no seat (the conductor needs a seat next to the controls)");
+                      if (bogeys.size() > Config.MAX_CARRIAGES.get() * 2) return skip(p, "too many bogeys (" + bogeys.size() + "), raise maxCarriages in the config");
                       int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
                       for (int[] b : bogeys) {
                           minX = Math.min(minX, b[0]); maxX = Math.max(maxX, b[0]);
@@ -569,12 +608,13 @@ jobs:
                       }
                       boolean axisX = (maxX - minX) >= (maxZ - minZ);
                       ListTag size = tag.getList("size", 3);
-                      if (size.size() == 3 && (axisX ? size.getInt(0) : size.getInt(2)) > 62) return null;
+                      if (size.size() == 3 && (axisX ? size.getInt(0) : size.getInt(2)) > 70) return skip(p, "train is longer than 70 blocks");
                       tag.put("blocks", kept);
                       Plan.Kind kind = cargo > 0 ? Plan.Kind.CARGO : fluid > 0 ? Plan.Kind.FLUID : Plan.Kind.PASSENGER;
+                      Jobs.LOG.info("Rail Nuke: schematic {} accepted as {} train ({} bogeys)", p.getFileName(), kind, bogeys.size());
                       return new Info(p.getFileName().toString(), kind, tag, bogeys, axisX);
                   } catch (Exception e) {
-                      return null;
+                      return skip(p, e.toString());
                   }
               }
           }
@@ -614,96 +654,132 @@ jobs:
 
               private TrainSpawner() {}
 
-              static void spawn(ServerLevel lv, Plan.Slot s, List<String> dests) {
-                  BoundingBox box = null;
+              /**
+               * attempt 0: the train is placed behind the station and assembled with the current station direction.
+               * If Create finds no train, the station is turned around and attempt 1 tries again with the same placed blocks.
+               */
+              static void spawn(ServerLevel lv, Plan plan, Plan.Slot s, List<String> dests, int attempt) {
+                  BoundingBox box = plan.boxes.get(s);
                   try {
                       Schematics.Info info = s.schem();
-                      StructureTemplate t = new StructureTemplate();
-                      t.load(lv.holderLookup(Registries.BLOCK), info.tag());
-                      Direction ext = Config.ASSEMBLE_AHEAD.get() ? s.dir() : s.dir().getOpposite();
-                      boolean extX = ext.getAxis() == Direction.Axis.X;
-                      Rotation rot = info.axisX() == extX ? Rotation.NONE : Rotation.CLOCKWISE_90;
-                      StructurePlaceSettings ps = new StructurePlaceSettings().setRotation(rot).setIgnoreEntities(true);
+                      if (box == null) {
+                          StructureTemplate t = new StructureTemplate();
+                          t.load(lv.holderLookup(Registries.BLOCK), info.tag());
+                          Direction ext = s.dir().getOpposite(); // the train body always lies on the platform, behind the station
+                          boolean extX = ext.getAxis() == Direction.Axis.X;
+                          Rotation rot = info.axisX() == extX ? Rotation.NONE : Rotation.CLOCKWISE_90;
+                          StructurePlaceSettings ps = new StructurePlaceSettings().setRotation(rot).setIgnoreEntities(true);
 
-                      BlockPos anchor = BlockPos.ZERO;
-                      int best = Integer.MAX_VALUE;
-                      for (int[] b : info.bogeys()) {
-                          BlockPos tp = StructureTemplate.calculateRelativePosition(ps, new BlockPos(b[0], b[1], b[2]));
-                          int c = ext.getStepX() * tp.getX() + ext.getStepZ() * tp.getZ();
-                          if (c < best) { best = c; anchor = tp; }
+                          BlockPos anchor = BlockPos.ZERO;
+                          int best = Integer.MAX_VALUE;
+                          for (int[] b : info.bogeys()) {
+                              BlockPos tp = StructureTemplate.calculateRelativePosition(ps, new BlockPos(b[0], b[1], b[2]));
+                              int c = ext.getStepX() * tp.getX() + ext.getStepZ() * tp.getZ();
+                              if (c < best) { best = c; anchor = tp; }
+                          }
+                          BlockPos org = s.track().above().subtract(anchor);
+                          t.placeInWorld(lv, org, org, ps, lv.getRandom(), 3);
+                          box = t.getBoundingBox(ps, org);
+                          plan.boxes.put(s, box);
                       }
-                      BlockPos org = s.track().above().subtract(anchor);
-                      t.placeInWorld(lv, org, org, ps, lv.getRandom(), 3);
-                      box = t.getBoundingBox(ps, org);
 
-                      if (!(lv.getBlockEntity(s.station()) instanceof StationBlockEntity sbe)) { clean(lv, box, s); return; }
+                      if (!(lv.getBlockEntity(s.station()) instanceof StationBlockEntity sbe)) {
+                          retryOrGiveUp(lv, plan, s, dests, attempt, box, "no station block entity");
+                          return;
+                      }
                       sbe.tryEnterAssemblyMode();
                       sbe.assemble(UUID.randomUUID());
                       GlobalStation gs = sbe.getStation();
                       Train train = gs == null ? null : gs.getPresentTrain();
-                      if (train == null) { clean(lv, box, s); return; }
-
-                      int n = train.carriages.size();
-                      if (n < Config.MIN_CARRIAGES.get() || n > Config.MAX_CARRIAGES.get()) {
-                          // no wagons attached (or too many) -> this train does not spawn
-                          Create.RAILWAYS.removeTrain(train.id);
-                          for (Carriage c : train.carriages) c.forEachPresentEntity(Entity::discard);
+                      if (train == null) {
+                          retryOrGiveUp(lv, plan, s, dests, attempt, box, "Create did not assemble a train");
                           return;
                       }
 
-                      train.name = Component.literal(s.kind().label + " Express " + s.name().substring(s.name().length() - 1));
-
-                      // schedule: cyclic list of every station of this train's kind
-                      ListTag entries = new ListTag();
-                      for (String d : dests) {
-                          CompoundTag e = new CompoundTag();
-                          CompoundTag ins = new CompoundTag();
-                          ins.putString("Id", "create:destination");
-                          CompoundTag data = new CompoundTag();
-                          data.putString("Text", d);
-                          ins.put("Data", data);
-                          e.put("Instruction", ins);
-                          ListTag conds = new ListTag();
-                          ListTag and = new ListTag();
-                          CompoundTag c = new CompoundTag();
-                          c.putString("Id", "create:delay");
-                          CompoundTag cd = new CompoundTag();
-                          cd.putInt("Value", 15);
-                          cd.putInt("TimeUnit", 1);
-                          c.put("Data", cd);
-                          and.add(c);
-                          conds.add(and);
-                          e.put("Conditions", conds);
-                          entries.add(e);
+                      int n = train.carriages.size();
+                      if (n < Config.MIN_CARRIAGES.get() || n > Config.MAX_CARRIAGES.get()) {
+                          Jobs.LOG.warn("Rail Nuke: train at {} has {} carriages (allowed {}-{}), removed", s.name(), n, Config.MIN_CARRIAGES.get(), Config.MAX_CARRIAGES.get());
+                          Create.RAILWAYS.removeTrain(train.id);
+                          for (Carriage c : train.carriages) c.forEachPresentEntity(Entity::discard);
+                          plan.failed++;
+                          return;
                       }
-                      CompoundTag st = new CompoundTag();
-                      st.put("Entries", entries);
-                      st.putBoolean("Cyclic", true);
-                      Schedule sch = Schedule.fromTag(lv.registryAccess(), st);
-                      train.runtime.setSchedule(sch, false);
 
-                      // NPC conductors on the conductor seats
-                      for (Carriage c : train.carriages) {
-                          c.forEachPresentEntity(cce -> {
-                              if (!(cce.getContraption() instanceof CarriageContraption cc)) return;
-                              for (BlockPos seat : cc.conductorSeats.keySet()) {
-                                  int idx = cc.getSeats().indexOf(seat);
-                                  if (idx < 0) continue;
-                                  ConductorEntity ce = RailNuke.CONDUCTOR.get().create(lv);
-                                  if (ce == null) continue;
-                                  ce.setPos(cce.position());
-                                  ce.setSkin(lv.random.nextInt(9));
-                                  ce.setCustomName(Component.literal(NAMES[lv.random.nextInt(NAMES.length)]));
-                                  ce.setCustomNameVisible(true);
-                                  lv.addFreshEntity(ce);
-                                  cce.addSittingPassenger(ce, idx);
-                              }
-                          });
+                      // this station direction works: remember it for every other station
+                      Plan.learned = plan.used(s);
+                      plan.trained.add(s);
+                      plan.spawned++;
+
+                      try {
+                          train.name = Component.literal(s.kind().label + " Express " + s.name().substring(s.name().length() - 1));
+
+                          // schedule: cyclic list of every station of this train's kind
+                          ListTag entries = new ListTag();
+                          for (String d : dests) {
+                              CompoundTag e = new CompoundTag();
+                              CompoundTag ins = new CompoundTag();
+                              ins.putString("Id", "create:destination");
+                              CompoundTag data = new CompoundTag();
+                              data.putString("Text", d);
+                              ins.put("Data", data);
+                              e.put("Instruction", ins);
+                              ListTag conds = new ListTag();
+                              ListTag and = new ListTag();
+                              CompoundTag c = new CompoundTag();
+                              c.putString("Id", "create:delay");
+                              CompoundTag cd = new CompoundTag();
+                              cd.putInt("Value", 15);
+                              cd.putInt("TimeUnit", 1);
+                              c.put("Data", cd);
+                              and.add(c);
+                              conds.add(and);
+                              e.put("Conditions", conds);
+                              entries.add(e);
+                          }
+                          CompoundTag st = new CompoundTag();
+                          st.put("Entries", entries);
+                          st.putBoolean("Cyclic", true);
+                          Schedule sch = Schedule.fromTag(lv.registryAccess(), st);
+                          train.runtime.setSchedule(sch, false);
+
+                          // NPC conductors on the conductor seats
+                          for (Carriage c : train.carriages) {
+                              c.forEachPresentEntity(cce -> {
+                                  if (!(cce.getContraption() instanceof CarriageContraption cc)) return;
+                                  for (BlockPos seat : cc.conductorSeats.keySet()) {
+                                      int idx = cc.getSeats().indexOf(seat);
+                                      if (idx < 0) continue;
+                                      ConductorEntity ce = RailNuke.CONDUCTOR.get().create(lv);
+                                      if (ce == null) continue;
+                                      ce.setPos(cce.position());
+                                      ce.setSkin(lv.random.nextInt(9));
+                                      ce.setCustomName(Component.literal(NAMES[lv.random.nextInt(NAMES.length)]));
+                                      ce.setCustomNameVisible(true);
+                                      lv.addFreshEntity(ce);
+                                      cce.addSittingPassenger(ce, idx);
+                                  }
+                              });
+                          }
+                      } catch (Throwable e) {
+                          Jobs.LOG.warn("Rail Nuke: train at {} spawned but schedule/conductor setup failed: {}", s.name(), e.toString());
                       }
                   } catch (Throwable e) {
-                      Jobs.LOG.warn("Rail Nuke: train spawn failed at {}: {}", s.name(), e.toString());
-                      if (box != null) clean(lv, box, s);
+                      retryOrGiveUp(lv, plan, s, dests, attempt, box, e.toString());
                   }
+              }
+
+              private static void retryOrGiveUp(ServerLevel lv, Plan plan, Plan.Slot s, List<String> dests, int attempt, BoundingBox box, String why) {
+                  if (attempt == 0) {
+                      boolean flip = !plan.used(s);
+                      Jobs.LOG.info("Rail Nuke: {} ({}), turning the station around and trying again", s.name(), why);
+                      // run order: re-place the station, wait, then try again
+                      plan.steps.addFirst(new Plan.Step(() -> spawn(lv, plan, s, dests, 1), 20, 10));
+                      plan.steps.addFirst(new Plan.Step(() -> plan.retarget(s, flip), 10, 50));
+                      return;
+                  }
+                  Jobs.LOG.warn("Rail Nuke: train spawn failed at {}: {}", s.name(), why);
+                  plan.failed++;
+                  if (box != null) clean(lv, box, s);
               }
 
               private static void clean(ServerLevel lv, BoundingBox box, Plan.Slot s) {
@@ -727,15 +803,23 @@ jobs:
           import net.createmod.catnip.data.Couple;
           import net.minecraft.core.BlockPos;
           import net.minecraft.core.Direction;
+          import net.minecraft.core.registries.BuiltInRegistries;
           import net.minecraft.network.chat.Component;
+          import net.minecraft.resources.ResourceLocation;
           import net.minecraft.server.level.ServerLevel;
           import net.minecraft.tags.BlockTags;
           import net.minecraft.util.RandomSource;
           import net.minecraft.world.InteractionHand;
           import net.minecraft.world.item.ItemStack;
           import net.minecraft.world.item.context.UseOnContext;
+          import net.minecraft.world.level.block.Block;
           import net.minecraft.world.level.block.Blocks;
+          import net.minecraft.world.level.block.LanternBlock;
+          import net.minecraft.world.level.block.StairBlock;
+          import net.minecraft.world.level.block.entity.BlockEntity;
           import net.minecraft.world.level.block.state.BlockState;
+          import net.minecraft.world.level.block.state.properties.Property;
+          import net.minecraft.world.level.levelgen.structure.BoundingBox;
           import net.minecraft.world.phys.BlockHitResult;
           import net.minecraft.world.phys.Vec3;
           import net.neoforged.neoforge.common.util.FakePlayer;
@@ -744,7 +828,7 @@ jobs:
           import java.util.*;
 
           /**
-           * One explosion = one Plan: a list of small build steps (tracks, curves, platforms, stations, signals, trains)
+           * One explosion = one Plan: a list of small build steps (tracks, curves, platforms, stations, signals, trains, scenery)
            * that Jobs executes a few per tick.
            */
           final class Plan {
@@ -758,21 +842,39 @@ jobs:
               record Curve(BlockPos a, Direction aOut, BlockPos b, Direction bOut) {}
               record Side(BlockPos start, Direction dir, int len) {}
               record Sig(BlockPos track, Direction dir, Direction side) {}
+              record Bed(BlockPos origin, Direction d, Direction o, int from, int to, int width) {}
+              record Buf(BlockPos pos, Direction d) {}
               record Slot(BlockPos track, Direction dir, Direction side, Kind kind, String name, Schematics.Info schem) {
                   BlockPos station() { return track.relative(side, 3).above(); }
               }
+
+              /** station direction that was proven to work (null = not known yet). Shared by all networks in this session. */
+              static Boolean learned = null;
+
+              static final int FRONT = 8;   // platform blocks in front of the station block
+              static final int BACK = 52;   // platform blocks behind the station block (where the train stands)
 
               final ServerLevel level;
               final Deque<Step> steps = new ArrayDeque<>();
               int wait;
 
+              // shared with TrainSpawner
+              final Map<Slot, BoundingBox> boxes = new IdentityHashMap<>();
+              final Set<Slot> trained = Collections.newSetFromMap(new IdentityHashMap<>());
+              int spawned, failed;
+
               private final int y, ox, oz;
               private final Map<BlockPos, Direction.Axis> tracks = new LinkedHashMap<>();
               private final Set<BlockPos> be = new HashSet<>();
+              private final Set<BlockPos> phantom = new HashSet<>();
               private final List<Curve> curves = new ArrayList<>();
               private final List<Slot> slots = new ArrayList<>();
               private final List<Sig> sigs = new ArrayList<>();
+              private final List<Bed> beds = new ArrayList<>();
+              private final List<Buf> buffers = new ArrayList<>();
+              private final Map<Slot, Boolean> used = new IdentityHashMap<>();
               private final List<Schematics.Info> pool;
+              private final Block phantomBlock;
               private final Map<Kind, Integer> counts = new EnumMap<>(Kind.class);
               private final RandomSource rnd = RandomSource.create();
 
@@ -782,10 +884,12 @@ jobs:
                   this.ox = o.getX();
                   this.oz = o.getZ();
                   this.pool = Config.SPAWN_TRAINS.get() ? Schematics.scan() : List.of();
+                  this.phantomBlock = Config.YARD_PHANTOM.get() ? modBlock("railways", "track_phantom") : null;
                   switch (tier) {
                       case 1 -> tier1();
                       case 2 -> tier2();
-                      default -> tier3();
+                      case 3 -> tier3();
+                      default -> tier4();
                   }
                   finish();
               }
@@ -826,12 +930,54 @@ jobs:
                   for (Side sd : s) signal(sd);
               }
 
+              /**
+               * Type 4: MEGA network. A huge ring with branch loops and stations on the inside and four big rail yards on the outside.
+               * Every yard is a ladder of parallel dead-end tracks with buffer stops. A phantom track (Steam 'n' Rails) carries each
+               * dead end on, invisibly, and merges it back into the next track, so the whole network is still one connected loop.
+               */
+              private void tier4() {
+                  List<Side> s = ring(440, 260, 12);
+                  loop(s.get(0), 4, Kind.CARGO);
+                  slot(s.get(0), 152, Kind.PASSENGER, false);
+                  loop(s.get(0), 176, Kind.FLUID);
+                  slot(s.get(0), 330, Kind.CARGO, false);
+                  yard(s.get(0), 200, 4);
+
+                  loop(s.get(1), 4, Kind.PASSENGER);
+                  slot(s.get(1), 152, Kind.FLUID, false);
+                  yard(s.get(1), 20, 4);
+
+                  loop(s.get(2), 4, Kind.CARGO);
+                  slot(s.get(2), 152, Kind.PASSENGER, false);
+                  loop(s.get(2), 176, Kind.FLUID);
+                  slot(s.get(2), 330, Kind.PASSENGER, false);
+                  yard(s.get(2), 200, 4);
+
+                  loop(s.get(3), 4, Kind.FLUID);
+                  slot(s.get(3), 152, Kind.CARGO, false);
+                  yard(s.get(3), 20, 4);
+                  for (Side sd : s) signal(sd);
+              }
+
               // ------------------------------------------------------------------ plan helpers
 
               private BlockPos at(int x, int z) { return new BlockPos(ox + x, y, oz + z); }
 
+              /** position on a platform: i = blocks behind the station block (negative = in front), l = blocks sideways from the track */
+              private BlockPos at(Slot s, int i, int l) {
+                  return s.track().relative(s.dir().getOpposite(), i).relative(s.side(), l);
+              }
+
               private void straight(BlockPos from, Direction d, int n) {
                   for (int i = 0; i <= n; i++) tracks.putIfAbsent(from.relative(d, i), d.getAxis());
+              }
+
+              private void phantomStraight(BlockPos from, Direction d, int n) {
+                  for (int i = 0; i <= n; i++) {
+                      BlockPos p = from.relative(d, i);
+                      tracks.putIfAbsent(p, d.getAxis());
+                      phantom.add(p);
+                  }
               }
 
               private void curve(BlockPos a, Direction aOut, BlockPos b, Direction bOut) {
@@ -862,6 +1008,7 @@ jobs:
 
               private Schematics.Info pick(Kind k) {
                   List<Schematics.Info> l = pool.stream().filter(i -> k == null || i.kind() == k).toList();
+                  if (l.isEmpty()) l = pool; // no train of that kind: any train is better than an empty station
                   return l.isEmpty() ? null : l.get(rnd.nextInt(l.size()));
               }
 
@@ -870,7 +1017,7 @@ jobs:
                   return k.label + " " + (char) ('A' + n - 1);
               }
 
-              /** Station on the main line (platform on the inner side, train spawns behind it). */
+              /** Station on the main line (platform on the inner side, train stands behind the station block). */
               private void slot(Side sd, int off, Kind k, boolean anyKind) {
                   Schematics.Info sc;
                   if (anyKind) {
@@ -897,12 +1044,57 @@ jobs:
                   slots.add(new Slot(q1.relative(d, 56), d, s, k, name(k), pick(k)));
               }
 
+              private BlockPos yp(Side sd, int along, int lat, Direction o) {
+                  return sd.start().relative(sd.dir(), along).relative(o, lat);
+              }
+
+              /**
+               * Rail yard on the OUTER side of a main-line side: a ladder of parallel tracks. Track k branches off track k-1.
+               * It ends in a visible dead end with a buffer stop, but a phantom track continues from there and merges back into
+               * track k-1 (and track 1 merges back into the main line), so trains can still drive through.
+               */
+              private void yard(Side sd, int off, int stubs) {
+                  Direction d = sd.dir(), o = d.getCounterClockWise();
+                  final int L = 16, W = 6, STEP = 20, TAIL = 36, GAP = 8;
+                  int mLast = off + L + STEP * (stubs - 1) + TAIL;
+                  for (int k = 1; k <= stubs; k++) {
+                      int pLong = off + STEP * (k - 1);
+                      int qLong = pLong + L;
+                      int m = mLast + STEP * (stubs - k);
+                      int rLong = m + L;
+                      int vLong = m - GAP;
+                      BlockPos p = yp(sd, pLong, W * (k - 1), o);
+                      BlockPos q = yp(sd, qLong, W * k, o);
+                      straight(q, d, vLong - qLong);
+                      BlockPos f = yp(sd, vLong + 1, W * k, o);
+                      if (phantomBlock != null) {
+                          phantomStraight(f, d, m - vLong - 1);
+                          buffers.add(new Buf(f, d));
+                      } else {
+                          straight(f, d, m - vLong - 1);
+                      }
+                      BlockPos mp = yp(sd, m, W * k, o);
+                      BlockPos r = yp(sd, rLong, W * (k - 1), o);
+                      curve(p, d, q, d.getOpposite());
+                      curve(mp, d, r, d.getOpposite());
+                  }
+                  beds.add(new Bed(sd.start(), d, o, off + 4, mLast + STEP * (stubs - 1) + L, W * stubs + 3));
+              }
+
               private void signal(Side sd) {
                   sigs.add(new Sig(sd.start().relative(sd.dir(), sd.len() - 4), sd.dir(), sd.dir().getClockWise()));
               }
 
-              private boolean positive(Direction d) {
-                  return (d.getAxisDirection() == Direction.AxisDirection.POSITIVE) ^ Config.FLIP_STATION.get();
+              static boolean positive(Direction d, boolean flip) {
+                  return (d.getAxisDirection() == Direction.AxisDirection.POSITIVE) ^ flip;
+              }
+
+              private static boolean flipNow() {
+                  return learned != null ? learned : Config.FLIP_STATION.get();
+              }
+
+              boolean used(Slot s) {
+                  return used.getOrDefault(s, flipNow());
               }
 
               // ------------------------------------------------------------------ ordered steps
@@ -916,9 +1108,15 @@ jobs:
                   steps.add(new Step(() -> {}, 0, 20));
                   for (Curve c : curves) steps.add(new Step(() -> buildCurve(c), 6, 0));
                   steps.add(new Step(() -> {}, 0, 30));
+                  for (Bed b : beds)
+                      for (int a = b.from(); a <= b.to(); a += 8) {
+                          int from = a, to = Math.min(a + 7, b.to());
+                          steps.add(new Step(() -> buildBed(b, from, to), 200, 0));
+                      }
+                  for (Buf b : buffers) steps.add(new Step(() -> buildBuffer(b), 6, 0));
                   for (Slot s : slots) {
-                      for (int i = -6; i <= 52; i += 8) {
-                          int from = i, to = Math.min(i + 7, 52);
+                      for (int i = -FRONT; i <= BACK; i += 8) {
+                          int from = i, to = Math.min(i + 7, BACK);
                           steps.add(new Step(() -> buildPlatform(s, from, to), 150, 0));
                       }
                   }
@@ -932,13 +1130,40 @@ jobs:
                       int i = all.indexOf(s.name());
                       List<String> dest = new ArrayList<>();
                       for (int k = 1; k <= all.size(); k++) dest.add(all.get((i + k) % all.size()));
-                      steps.add(new Step(() -> TrainSpawner.spawn(level, s, dest), 20, 10));
+                      steps.add(new Step(() -> TrainSpawner.spawn(level, this, s, dest, 0), 20, 10));
                   }
-                  steps.add(new Step(() -> level.getServer().getPlayerList()
-                          .broadcastSystemMessage(Component.literal("Rail network complete!"), false), 1, 0));
+                  // stations that got no train must still face the direction that was proven to work
+                  steps.add(new Step(() -> {
+                      if (learned == null) return;
+                      for (Slot s : slots) if (!trained.contains(s) && used(s) != learned) retarget(s, learned);
+                  }, 10, 20));
+                  // scenery last: the train blocks are gone by now, so nothing gets in the way
+                  for (Slot s : slots) steps.add(new Step(() -> decorate(s), 120, 0));
+                  steps.add(new Step(() -> level.getServer().getPlayerList().broadcastSystemMessage(Component.literal(summary()), false), 1, 0));
+              }
+
+              private String summary() {
+                  if (!Config.SPAWN_TRAINS.get()) return "Rail network complete! (train spawning is off in the config)";
+                  if (pool.isEmpty())
+                      return "Rail network complete, but NO usable train schematic was found in " + Schematics.mainRoot()
+                              + " (a train needs Train Controls, a seat and at least 2 bogeys). See the log for details.";
+                  return "Rail network complete! Trains spawned: " + spawned + (failed > 0 ? " (failed: " + failed + ", see log)" : "");
               }
 
               // ------------------------------------------------------------------ world operations
+
+              private static Block modBlock(String ns, String path) {
+                  return BuiltInRegistries.BLOCK.getOptional(ResourceLocation.fromNamespaceAndPath(ns, path)).orElse(null);
+              }
+
+              private static <T extends Comparable<T>> BlockState trySet(BlockState st, Property<T> p, String v) {
+                  return p.getValue(v).map(x -> st.setValue(p, x)).orElse(st);
+              }
+
+              private static BlockState prop(BlockState st, String name, String value) {
+                  Property<?> p = st.getBlock().getStateDefinition().getProperty(name);
+                  return p == null ? st : trySet(st, p, value);
+              }
 
               private void clear(BlockPos q) {
                   BlockState st = level.getBlockState(q);
@@ -951,24 +1176,39 @@ jobs:
                   return st.isAir() || st.canBeReplaced() || !st.getFluidState().isEmpty() || st.is(BlockTags.LEAVES);
               }
 
-              private void buildTrack(BlockPos p, Direction.Axis ax) {
-                  Direction lat = ax == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
-                  for (int l = -4; l <= 4; l++)
-                      for (int h = 0; h <= 6; h++) {
-                          if (l == 0 && h == 0) continue;
-                          clear(p.relative(lat, l).above(h));
-                      }
-                  for (int l = -1; l <= 1; l++) {
-                      BlockPos q = p.relative(lat, l).below();
-                      if (level.getBlockState(q).getDestroySpeed(level, q) >= 0)
-                          level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
-                  }
-                  for (int k = 2; k <= 24; k++) {
+              private void foundation(BlockPos p) {
+                  for (int k = 1; k <= 24; k++) {
                       BlockPos q = p.below(k);
                       if (!fillable(q)) break;
                       level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
                   }
-                  BlockState state = AllBlocks.TRACK.getDefaultState()
+              }
+
+              private void buildTrack(BlockPos p, Direction.Axis ax) {
+                  boolean ph = phantomBlock != null && phantom.contains(p);
+                  Direction lat = ax == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
+                  if (ph) {
+                      for (int h = 1; h <= 4; h++) clear(p.above(h));
+                  } else {
+                      for (int l = -4; l <= 4; l++)
+                          for (int h = 0; h <= 6; h++) {
+                              if (l == 0 && h == 0) continue;
+                              clear(p.relative(lat, l).above(h));
+                          }
+                      for (int l = -1; l <= 1; l++) {
+                          BlockPos q = p.relative(lat, l).below();
+                          if (level.getBlockState(q).getDestroySpeed(level, q) >= 0)
+                              level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
+                      }
+                      for (int k = 2; k <= 24; k++) {
+                          BlockPos q = p.below(k);
+                          if (!fillable(q)) break;
+                          level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
+                      }
+                  }
+                  Block base = ph ? phantomBlock : AllBlocks.TRACK.get();
+                  if (!(base instanceof TrackBlock)) base = AllBlocks.TRACK.get();
+                  BlockState state = base.defaultBlockState()
                           .setValue(TrackBlock.SHAPE, ax == Direction.Axis.X ? TrackShape.XO : TrackShape.ZO)
                           .setValue(TrackBlock.HAS_BE, be.contains(p));
                   level.setBlock(p, state, 3);
@@ -992,30 +1232,150 @@ jobs:
                   }
               }
 
+              /** gravel bed between the yard tracks */
+              private void buildBed(Bed b, int from, int to) {
+                  for (int lg = from; lg <= to; lg++)
+                      for (int lat = 2; lat <= b.width(); lat++) {
+                          BlockPos p = b.origin().relative(b.d(), lg).relative(b.o(), lat);
+                          if (level.getBlockState(p).getBlock() instanceof TrackBlock) continue;
+                          BlockPos g = p.below();
+                          if (level.getBlockState(g).is(Blocks.STONE_BRICKS)) continue;
+                          for (int h = 0; h <= 4; h++) clear(p.above(h));
+                          if (level.getBlockState(g).getDestroySpeed(level, g) >= 0)
+                              level.setBlock(g, Blocks.GRAVEL.defaultBlockState(), 2 | 16);
+                      }
+              }
+
+              /** buffer stop at the visible end of a yard track (the phantom track carries on under it) */
+              private void buildBuffer(Buf b) {
+                  Direction lat = b.d().getClockWise();
+                  BlockPos c = b.pos().above();
+                  level.setBlock(c, Blocks.RED_CONCRETE.defaultBlockState(), 2);
+                  level.setBlock(c.above(), Blocks.YELLOW_CARPET.defaultBlockState(), 2);
+                  level.setBlock(c.relative(lat), Blocks.IRON_BARS.defaultBlockState(), 2);
+                  level.setBlock(c.relative(lat.getOpposite()), Blocks.IRON_BARS.defaultBlockState(), 2);
+              }
+
               private void buildPlatform(Slot s, int from, int to) {
-                  Direction back = s.dir().getOpposite();
                   for (int i = from; i <= to; i++)
                       for (int l = 3; l <= 5; l++) {
-                          BlockPos p = s.track().relative(back, i).relative(s.side(), l);
+                          BlockPos p = at(s, i, l);
                           for (int h = 1; h <= 6; h++) clear(p.above(h));
-                          level.setBlock(p, (l == 3 ? Blocks.POLISHED_ANDESITE : Blocks.SMOOTH_STONE).defaultBlockState(), 2);
-                          for (int k = 1; k <= 24; k++) {
-                              BlockPos q = p.below(k);
-                              if (!fillable(q)) break;
-                              level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
-                          }
+                          // yellow safety stripe on the edge, light stone further back
+                          Block top = l == 3 ? Blocks.YELLOW_TERRACOTTA : l == 4 ? Blocks.POLISHED_ANDESITE : Blocks.SMOOTH_STONE;
+                          level.setBlock(p, top.defaultBlockState(), 2);
+                          foundation(p);
                       }
               }
 
               private void buildStation(Slot s) {
-                  target(AllBlocks.TRACK_STATION.asStack(), s.track(), positive(s.dir()), s.station());
+                  boolean flip = flipNow();
+                  used.put(s, flip);
+                  placeStation(s, flip);
+              }
+
+              private void placeStation(Slot s, boolean flip) {
+                  target(AllBlocks.TRACK_STATION.asStack(), s.track(), positive(s.dir(), flip), s.station());
                   if (level.getBlockEntity(s.station()) instanceof StationBlockEntity sbe) sbe.updateName(s.name());
+              }
+
+              /** Turn a station around (used when Create did not assemble the train with the first direction). */
+              void retarget(Slot s, boolean flip) {
+                  level.destroyBlock(s.station(), false);
+                  used.put(s, flip);
+                  placeStation(s, flip);
               }
 
               private void buildSignal(Sig g) {
                   BlockPos support = g.track().relative(g.side(), 2);
                   level.setBlock(support, Blocks.STONE_BRICKS.defaultBlockState(), 2);
-                  target(AllBlocks.TRACK_SIGNAL.asStack(), g.track(), positive(g.dir()), support.above());
+                  target(AllBlocks.TRACK_SIGNAL.asStack(), g.track(), positive(g.dir(), flipNow()), support.above());
+              }
+
+              /** Roof, pillars, lamps, benches, plus a station house (passenger) or a vault / tank yard (cargo / fluid). */
+              private void decorate(Slot s) {
+                  Direction side = s.side();
+                  BlockState wall = Blocks.STONE_BRICK_WALL.defaultBlockState();
+                  BlockState roof = Blocks.DEEPSLATE_TILE_SLAB.defaultBlockState();
+                  BlockState lamp = Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true);
+                  BlockState bench = Blocks.SPRUCE_STAIRS.defaultBlockState().setValue(StairBlock.FACING, side.getOpposite());
+                  for (int i = -FRONT; i <= BACK; i++)
+                      for (int l = 3; l <= 6; l++) level.setBlock(at(s, i, l).above(5), roof, 2);
+                  for (int i : new int[]{-6, 6, 18, 30, 42, 52})
+                      for (int h = 1; h <= 4; h++) level.setBlock(at(s, i, 5).above(h), wall, 2);
+                  for (int i : new int[]{0, 12, 24, 36, 48}) {
+                      level.setBlock(at(s, i, 4).above(4), lamp, 2);
+                      level.setBlock(at(s, i, 5).above(1), bench, 2);
+                  }
+                  if (s.kind() == Kind.PASSENGER) house(s, lamp);
+                  else storage(s);
+              }
+
+              private void house(Slot s, BlockState lamp) {
+                  for (int i = 14; i <= 28; i++)
+                      for (int l = 6; l <= 9; l++) {
+                          BlockPos g = at(s, i, l);
+                          for (int h = 1; h <= 6; h++) clear(g.above(h));
+                          level.setBlock(g, Blocks.POLISHED_ANDESITE.defaultBlockState(), 2);
+                          foundation(g);
+                          boolean edge = i == 14 || i == 28 || l == 6 || l == 9;
+                          boolean door = l == 6 && i >= 20 && i <= 22;
+                          for (int h = 1; h <= 3; h++) {
+                              BlockState st = Blocks.AIR.defaultBlockState();
+                              if (edge && !(door && h <= 2)) {
+                                  boolean win = h == 2 && !door && (((l == 6 || l == 9) && (i - 14) % 4 == 2) || ((i == 14 || i == 28) && (l == 7 || l == 8)));
+                                  st = (win ? Blocks.GLASS : Blocks.STONE_BRICKS).defaultBlockState();
+                              }
+                              level.setBlock(g.above(h), st, 2);
+                          }
+                          level.setBlock(g.above(4), Blocks.SPRUCE_SLAB.defaultBlockState(), 2);
+                      }
+                  level.setBlock(at(s, 21, 7).above(3), lamp, 2);
+                  level.setBlock(at(s, 21, 8).above(3), lamp, 2);
+              }
+
+              /** Cargo stations get Create item vaults, fluid stations get Create fluid tanks. */
+              private void storage(Slot s) {
+                  boolean cargo = s.kind() == Kind.CARGO;
+                  Block b = modBlock("create", cargo ? "item_vault" : "fluid_tank");
+                  if (b == null) return;
+                  for (int i = 2; i <= 50; i++)
+                      for (int l = 6; l <= 9; l++) {
+                          BlockPos g = at(s, i, l);
+                          for (int h = 1; h <= 6; h++) clear(g.above(h));
+                          level.setBlock(g, Blocks.POLISHED_ANDESITE.defaultBlockState(), 2);
+                          foundation(g);
+                      }
+                  BlockState base = prop(b.defaultBlockState(), "horizontal_axis", s.dir().getAxis().getSerializedName());
+                  int[] starts = cargo ? new int[]{4, 15, 26, 37} : new int[]{6, 16, 26, 36, 46};
+                  int len = cargo ? 9 : 2, height = cargo ? 2 : 3;
+                  List<BlockPos> placed = new ArrayList<>();
+                  for (int st : starts)
+                      for (int i = st; i < st + len; i++)
+                          for (int l = 7; l <= 8; l++)
+                              for (int h = 1; h <= height; h++) {
+                                  BlockPos p = at(s, i, l).above(h);
+                                  level.setBlock(p, base, 3);
+                                  placed.add(p);
+                              }
+                  for (BlockPos p : placed) connect(p);
+              }
+
+              /** Asks the vault / tank to merge with its neighbours (what Create's own item does after placing). */
+              private void connect(BlockPos p) {
+                  BlockEntity e = level.getBlockEntity(p);
+                  if (e == null) return;
+                  for (Class<?> c = e.getClass(); c != null; c = c.getSuperclass()) {
+                      try {
+                          var m = c.getDeclaredMethod("updateConnectivity");
+                          m.setAccessible(true);
+                          m.invoke(e);
+                          return;
+                      } catch (NoSuchMethodException ignored) {
+                      } catch (Throwable t) {
+                          return;
+                      }
+                  }
               }
 
               /** Uses Create's own track-targeting item exactly like a player would (select track, then place the block). */
@@ -1054,7 +1414,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: railnuke-result
+          name: railnuke-1.1.0-result
           path: result/*
           if-no-files-found: warn
 

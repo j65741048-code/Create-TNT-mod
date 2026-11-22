@@ -1,1 +1,1042 @@
+name: Build Rail Nuke
 
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      - name: Generate project files
+        run: |
+          set -e
+          pip install pillow
+          R=src/main/resources
+          J=src/main/java/com/railnuke
+          mkdir -p $J $R/META-INF $R/assets/railnuke/{blockstates,models/block,models/item,textures/block,lang} $R/data/railnuke/{loot_table/blocks,recipe}
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  gradlePluginPortal()
+                  mavenCentral()
+                  maven { url = 'https://maven.neoforged.net/releases' }
+              }
+          }
+          rootProject.name = 'railnuke'
+          EOF
+
+          echo "org.gradle.jvmargs=-Xmx3G" > gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+
+          cat > $R/pack.mcmeta <<'EOF'
+          {"pack":{"description":"Rail Nuke","pack_format":34}}
+          EOF
+
+          cat > $R/META-INF/neoforge.mods.toml <<'EOF'
+          modLoader="javafml"
+          loaderVersion="[4,)"
+          license="MIT"
+
+          [[mods]]
+          modId="railnuke"
+          version="1.0.0"
+          displayName="Rail Nuke: Train TNT"
+          logoFile="logo.png"
+          authors="You"
+          description='''Three TNT blocks that explode into a whole Create railway network with stations, signals, branch loops and AI trains driven by NPC conductors.'''
+
+          [[dependencies.railnuke]]
+          modId="neoforge"
+          type="required"
+          versionRange="[21.1,)"
+          ordering="NONE"
+          side="BOTH"
+
+          [[dependencies.railnuke]]
+          modId="minecraft"
+          type="required"
+          versionRange="[1.21.1,1.22)"
+          ordering="NONE"
+          side="BOTH"
+
+          [[dependencies.railnuke]]
+          modId="create"
+          type="required"
+          versionRange="[6.0.0,)"
+          ordering="AFTER"
+          side="BOTH"
+          EOF
+
+          # ---------- textures + icon ----------
+          cat > gen_art.py <<'EOF'
+          from PIL import Image, ImageDraw
+          BR = (212, 162, 76, 255)
+          WH = (240, 240, 230, 255)
+          T = ["###", ".#.", ".#.", ".#.", ".#."]
+          N = ["#.#", "###", "###", "#.#", "#.#"]
+          def side(col):
+              im = Image.new('RGBA', (16, 16), (58, 60, 66, 255))
+              d = ImageDraw.Draw(im)
+              d.rectangle([0, 0, 15, 1], fill=BR)
+              d.rectangle([0, 2, 15, 12], fill=col)
+              d.rectangle([0, 2, 15, 2], fill=BR)
+              for x in (1, 6, 11):
+                  d.rectangle([x, 3, x + 3, 5], fill=(150, 200, 230, 255))
+              d.rectangle([0, 6, 15, 6], fill=BR)
+              for gi, g in enumerate([T, N, T]):
+                  for yy, row in enumerate(g):
+                      for xx, ch in enumerate(row):
+                          if ch == '#':
+                              im.putpixel((2 + gi * 4 + xx, 7 + yy), WH)
+              for x in (2, 3, 11, 12):
+                  d.rectangle([x, 13, x, 14], fill=(25, 25, 25, 255))
+              d.rectangle([0, 15, 15, 15], fill=(130, 130, 130, 255))
+              return im
+          def top(col):
+              im = Image.new('RGBA', (16, 16), (112, 114, 118, 255))
+              d = ImageDraw.Draw(im)
+              d.rectangle([0, 0, 15, 15], outline=BR)
+              for y in range(1, 15, 3):
+                  d.rectangle([2, y, 13, y], fill=(86, 70, 52, 255))
+              d.rectangle([4, 1, 4, 14], fill=(190, 190, 190, 255))
+              d.rectangle([11, 1, 11, 14], fill=(190, 190, 190, 255))
+              d.rectangle([6, 6, 9, 9], fill=col)
+              d.rectangle([7, 7, 8, 8], fill=(30, 30, 30, 255))
+              return im
+          cols = {'small': (63, 150, 80, 255), 'medium': (60, 110, 190, 255), 'large': (190, 60, 60, 255)}
+          base = 'src/main/resources/assets/railnuke/textures/block/'
+          for k, c in cols.items():
+              side(c).save(base + 'tnt_' + k + '_side.png')
+              top(c).save(base + 'tnt_' + k + '_top.png')
+          bot = Image.new('RGBA', (16, 16), (70, 72, 76, 255))
+          ImageDraw.Draw(bot).rectangle([0, 0, 15, 15], outline=BR)
+          bot.save(base + 'tnt_bottom.png')
+          icon = Image.new('RGBA', (128, 128), (40, 42, 48, 255))
+          d = ImageDraw.Draw(icon)
+          d.rectangle([0, 0, 127, 127], outline=BR, width=4)
+          icon.paste(side(cols['medium']).resize((96, 96), Image.NEAREST), (16, 16))
+          icon.save('src/main/resources/logo.png')
+          EOF
+          python3 gen_art.py
+          rm gen_art.py
+
+          # ---------- json assets ----------
+          for t in small medium large; do
+            cat > $R/assets/railnuke/blockstates/tnt_$t.json <<EOF
+          {"variants":{"":{"model":"railnuke:block/tnt_$t"}}}
+          EOF
+            cat > $R/assets/railnuke/models/block/tnt_$t.json <<EOF
+          {"parent":"minecraft:block/cube_bottom_top","textures":{"top":"railnuke:block/tnt_${t}_top","bottom":"railnuke:block/tnt_bottom","side":"railnuke:block/tnt_${t}_side"}}
+          EOF
+            cat > $R/assets/railnuke/models/item/tnt_$t.json <<EOF
+          {"parent":"railnuke:block/tnt_$t"}
+          EOF
+            cat > $R/data/railnuke/loot_table/blocks/tnt_$t.json <<EOF
+          {"type":"minecraft:block","pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"railnuke:tnt_$t"}],"conditions":[{"condition":"minecraft:survives_explosion"}]}]}
+          EOF
+          done
+
+          cat > $R/assets/railnuke/lang/en_us.json <<'EOF'
+          {
+            "block.railnuke.tnt_small": "Rail TNT: Toy Set",
+            "block.railnuke.tnt_medium": "Rail TNT: Regional Network",
+            "block.railnuke.tnt_large": "Rail TNT: Grand Network",
+            "entity.railnuke.conductor": "Train Conductor"
+          }
+          EOF
+
+          cat > $R/data/railnuke/recipe/tnt_small.json <<'EOF'
+          {"type":"minecraft:crafting_shapeless","category":"misc","ingredients":[{"item":"minecraft:tnt"},{"item":"create:track"},{"item":"create:track"},{"item":"create:track"}],"result":{"id":"railnuke:tnt_small","count":1}}
+          EOF
+          cat > $R/data/railnuke/recipe/tnt_medium.json <<'EOF'
+          {"type":"minecraft:crafting_shapeless","category":"misc","ingredients":[{"item":"railnuke:tnt_small"},{"item":"create:railway_casing"},{"item":"create:track_station"},{"item":"create:track_signal"}],"result":{"id":"railnuke:tnt_medium","count":1}}
+          EOF
+          cat > $R/data/railnuke/recipe/tnt_large.json <<'EOF'
+          {"type":"minecraft:crafting_shapeless","category":"misc","ingredients":[{"item":"railnuke:tnt_medium"},{"item":"minecraft:tnt"},{"item":"create:railway_casing"},{"item":"create:track_station"},{"item":"create:track_signal"}],"result":{"id":"railnuke:tnt_large","count":1}}
+          EOF
+
+          # ---------- java ----------
+          cat > $J/RailNuke.java <<'EOF'
+          package com.railnuke;
+
+          import net.minecraft.core.registries.Registries;
+          import net.minecraft.world.entity.EntityType;
+          import net.minecraft.world.entity.MobCategory;
+          import net.minecraft.world.item.BlockItem;
+          import net.minecraft.world.item.CreativeModeTabs;
+          import net.minecraft.world.level.block.SoundType;
+          import net.minecraft.world.level.block.state.BlockBehaviour;
+          import net.minecraft.world.level.material.MapColor;
+          import net.neoforged.bus.api.IEventBus;
+          import net.neoforged.fml.ModContainer;
+          import net.neoforged.fml.common.Mod;
+          import net.neoforged.fml.config.ModConfig;
+          import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
+          import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
+          import net.neoforged.neoforge.registries.DeferredBlock;
+          import net.neoforged.neoforge.registries.DeferredHolder;
+          import net.neoforged.neoforge.registries.DeferredItem;
+          import net.neoforged.neoforge.registries.DeferredRegister;
+
+          @Mod(RailNuke.ID)
+          public class RailNuke {
+              public static final String ID = "railnuke";
+              public static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(ID);
+              public static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(ID);
+              public static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(Registries.ENTITY_TYPE, ID);
+
+              private static BlockBehaviour.Properties props() {
+                  return BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_RED).instabreak().sound(SoundType.GRASS).ignitedByLava();
+              }
+
+              public static final DeferredBlock<RailNukeBlock> SMALL = BLOCKS.register("tnt_small", () -> new RailNukeBlock(props(), 1));
+              public static final DeferredBlock<RailNukeBlock> MEDIUM = BLOCKS.register("tnt_medium", () -> new RailNukeBlock(props(), 2));
+              public static final DeferredBlock<RailNukeBlock> LARGE = BLOCKS.register("tnt_large", () -> new RailNukeBlock(props(), 3));
+              public static final DeferredItem<BlockItem> SMALL_ITEM = ITEMS.registerSimpleBlockItem("tnt_small", SMALL);
+              public static final DeferredItem<BlockItem> MEDIUM_ITEM = ITEMS.registerSimpleBlockItem("tnt_medium", MEDIUM);
+              public static final DeferredItem<BlockItem> LARGE_ITEM = ITEMS.registerSimpleBlockItem("tnt_large", LARGE);
+
+              public static final DeferredHolder<EntityType<?>, EntityType<ConductorEntity>> CONDUCTOR = ENTITIES.register("conductor",
+                      () -> EntityType.Builder.of(ConductorEntity::new, MobCategory.MISC).sized(0.6f, 1.8f).clientTrackingRange(10).build("conductor"));
+
+              public RailNuke(IEventBus bus, ModContainer container) {
+                  BLOCKS.register(bus);
+                  ITEMS.register(bus);
+                  ENTITIES.register(bus);
+                  container.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+                  bus.addListener(this::attributes);
+                  bus.addListener(this::tabs);
+              }
+
+              private void attributes(EntityAttributeCreationEvent e) {
+                  e.put(CONDUCTOR.get(), ConductorEntity.attrs().build());
+              }
+
+              private void tabs(BuildCreativeModeTabContentsEvent e) {
+                  if (e.getTabKey() == CreativeModeTabs.REDSTONE_BLOCKS) {
+                      e.accept(SMALL_ITEM.get());
+                      e.accept(MEDIUM_ITEM.get());
+                      e.accept(LARGE_ITEM.get());
+                  }
+              }
+          }
+          EOF
+
+          cat > $J/Config.java <<'EOF'
+          package com.railnuke;
+
+          import net.neoforged.neoforge.common.ModConfigSpec;
+
+          public class Config {
+              private static final ModConfigSpec.Builder B = new ModConfigSpec.Builder();
+              public static final ModConfigSpec.BooleanValue SPAWN_TRAINS = B.comment("Spawn AI trains built from schematics").define("spawnTrains", true);
+              public static final ModConfigSpec.IntValue MIN_CARRIAGES = B.comment("Minimum carriages (locomotive + wagons). A train with fewer is removed").defineInRange("minCarriages", 2, 1, 20);
+              public static final ModConfigSpec.IntValue MAX_CARRIAGES = B.comment("Maximum carriages (locomotive + 5 wagons = 6)").defineInRange("maxCarriages", 6, 1, 20);
+              public static final ModConfigSpec.BooleanValue FLIP_STATION = B.comment("Flip the direction stations/signals face if trains skip them").define("flipStationDirection", false);
+              public static final ModConfigSpec.BooleanValue ASSEMBLE_AHEAD = B.comment("Spawn trains ahead of the station arrow instead of behind it").define("assembleAheadOfStation", false);
+              public static final ModConfigSpec.IntValue BUDGET = B.comment("Build work per tick (lower = less lag)").defineInRange("workPerTick", 600, 50, 5000);
+              public static final ModConfigSpec SPEC = B.build();
+          }
+          EOF
+
+          cat > $J/RailNukeBlock.java <<'EOF'
+          package com.railnuke;
+
+          import net.minecraft.core.BlockPos;
+          import net.minecraft.core.Direction;
+          import net.minecraft.server.level.ServerLevel;
+          import net.minecraft.world.InteractionHand;
+          import net.minecraft.world.ItemInteractionResult;
+          import net.minecraft.world.entity.LivingEntity;
+          import net.minecraft.world.entity.player.Player;
+          import net.minecraft.world.entity.projectile.Projectile;
+          import net.minecraft.world.item.ItemStack;
+          import net.minecraft.world.item.Items;
+          import net.minecraft.world.level.Explosion;
+          import net.minecraft.world.level.Level;
+          import net.minecraft.world.level.block.Block;
+          import net.minecraft.world.level.block.Blocks;
+          import net.minecraft.world.level.block.state.BlockState;
+          import net.minecraft.world.phys.BlockHitResult;
+          import org.jetbrains.annotations.Nullable;
+
+          public class RailNukeBlock extends Block {
+              public final int tier;
+
+              public RailNukeBlock(Properties p, int tier) {
+                  super(p);
+                  this.tier = tier;
+              }
+
+              private void ignite(Level level, BlockPos pos) {
+                  if (level.isClientSide || !(level instanceof ServerLevel sl)) return;
+                  sl.explode(null, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 3.0F + tier, Level.ExplosionInteraction.NONE);
+                  Jobs.start(sl, pos, tier);
+              }
+
+              @Override
+              protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+                  if (!stack.is(Items.FLINT_AND_STEEL) && !stack.is(Items.FIRE_CHARGE)) {
+                      return super.useItemOn(stack, state, level, pos, player, hand, hit);
+                  }
+                  ignite(level, pos);
+                  level.setBlock(pos, Blocks.AIR.defaultBlockState(), 11);
+                  if (!player.isCreative()) {
+                      if (stack.is(Items.FLINT_AND_STEEL)) stack.hurtAndBreak(1, player, LivingEntity.getSlotForHand(hand));
+                      else stack.shrink(1);
+                  }
+                  return ItemInteractionResult.sidedSuccess(level.isClientSide);
+              }
+
+              @Override
+              protected void onPlace(BlockState state, Level level, BlockPos pos, BlockState old, boolean moved) {
+                  if (!old.is(state.getBlock()) && level.hasNeighborSignal(pos)) {
+                      ignite(level, pos);
+                      level.removeBlock(pos, false);
+                  }
+              }
+
+              @Override
+              protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos from, boolean moved) {
+                  if (level.hasNeighborSignal(pos)) {
+                      ignite(level, pos);
+                      level.removeBlock(pos, false);
+                  }
+              }
+
+              @Override
+              public void onCaughtFire(BlockState state, Level level, BlockPos pos, @Nullable Direction face, @Nullable LivingEntity igniter) {
+                  ignite(level, pos);
+              }
+
+              @Override
+              public void wasExploded(Level level, BlockPos pos, Explosion explosion) {
+                  ignite(level, pos);
+              }
+
+              @Override
+              protected void onProjectileHit(Level level, BlockState state, BlockHitResult hit, Projectile projectile) {
+                  if (!level.isClientSide) {
+                      BlockPos pos = hit.getBlockPos();
+                      if (projectile.isOnFire() && projectile.mayInteract(level, pos)) {
+                          ignite(level, pos);
+                          level.removeBlock(pos, false);
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat > $J/ConductorEntity.java <<'EOF'
+          package com.railnuke;
+
+          import net.minecraft.nbt.CompoundTag;
+          import net.minecraft.network.syncher.EntityDataAccessor;
+          import net.minecraft.network.syncher.EntityDataSerializers;
+          import net.minecraft.network.syncher.SynchedEntityData;
+          import net.minecraft.world.entity.EntityType;
+          import net.minecraft.world.entity.Mob;
+          import net.minecraft.world.entity.PathfinderMob;
+          import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
+          import net.minecraft.world.entity.ai.attributes.Attributes;
+          import net.minecraft.world.level.Level;
+
+          /** Player-looking NPC that sits at the controls of AI trains. */
+          public class ConductorEntity extends PathfinderMob {
+              private static final EntityDataAccessor<Integer> SKIN = SynchedEntityData.defineId(ConductorEntity.class, EntityDataSerializers.INT);
+
+              public ConductorEntity(EntityType<? extends PathfinderMob> type, Level level) {
+                  super(type, level);
+                  setNoAi(true);
+                  setPersistenceRequired();
+                  setInvulnerable(true);
+              }
+
+              public static AttributeSupplier.Builder attrs() {
+                  return Mob.createMobAttributes().add(Attributes.MAX_HEALTH, 20.0);
+              }
+
+              @Override
+              protected void defineSynchedData(SynchedEntityData.Builder b) {
+                  super.defineSynchedData(b);
+                  b.define(SKIN, 0);
+              }
+
+              public int getSkin() { return entityData.get(SKIN); }
+              public void setSkin(int i) { entityData.set(SKIN, i); }
+
+              @Override
+              public void addAdditionalSaveData(CompoundTag t) {
+                  super.addAdditionalSaveData(t);
+                  t.putInt("Skin", getSkin());
+              }
+
+              @Override
+              public void readAdditionalSaveData(CompoundTag t) {
+                  super.readAdditionalSaveData(t);
+                  setSkin(t.getInt("Skin"));
+              }
+
+              @Override
+              public boolean removeWhenFarAway(double d) { return false; }
+          }
+          EOF
+
+          cat > $J/ConductorRenderer.java <<'EOF'
+          package com.railnuke;
+
+          import net.minecraft.client.model.PlayerModel;
+          import net.minecraft.client.model.geom.ModelLayers;
+          import net.minecraft.client.renderer.entity.EntityRendererProvider;
+          import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
+          import net.minecraft.resources.ResourceLocation;
+
+          public class ConductorRenderer extends HumanoidMobRenderer<ConductorEntity, PlayerModel<ConductorEntity>> {
+              private static final String[] SKINS = {"alex", "ari", "efe", "kai", "makena", "noor", "steve", "sunny", "zuri"};
+
+              public ConductorRenderer(EntityRendererProvider.Context ctx) {
+                  super(ctx, new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), false), 0.5F);
+              }
+
+              @Override
+              public ResourceLocation getTextureLocation(ConductorEntity e) {
+                  return ResourceLocation.withDefaultNamespace("textures/entity/player/wide/" + SKINS[Math.floorMod(e.getSkin(), SKINS.length)] + ".png");
+              }
+          }
+          EOF
+
+          cat > $J/Client.java <<'EOF'
+          package com.railnuke;
+
+          import net.neoforged.api.distmarker.Dist;
+          import net.neoforged.bus.api.SubscribeEvent;
+          import net.neoforged.fml.common.EventBusSubscriber;
+          import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+
+          @EventBusSubscriber(modid = RailNuke.ID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
+          public class Client {
+              @SubscribeEvent
+              public static void renderers(EntityRenderersEvent.RegisterRenderers e) {
+                  e.registerEntityRenderer(RailNuke.CONDUCTOR.get(), ConductorRenderer::new);
+              }
+          }
+          EOF
+
+          cat > $J/Jobs.java <<'EOF'
+          package com.railnuke;
+
+          import com.mojang.logging.LogUtils;
+          import net.minecraft.core.BlockPos;
+          import net.minecraft.server.level.ServerLevel;
+          import net.neoforged.bus.api.SubscribeEvent;
+          import net.neoforged.fml.common.EventBusSubscriber;
+          import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+          import net.neoforged.neoforge.event.tick.ServerTickEvent;
+          import org.slf4j.Logger;
+
+          import java.util.ArrayDeque;
+
+          /** Runs network builds a little every tick so the server never freezes. */
+          @EventBusSubscriber(modid = RailNuke.ID)
+          public final class Jobs {
+              static final Logger LOG = LogUtils.getLogger();
+              private static final ArrayDeque<Plan> QUEUE = new ArrayDeque<>();
+
+              private Jobs() {}
+
+              static void start(ServerLevel level, BlockPos pos, int tier) {
+                  try {
+                      QUEUE.add(new Plan(level, pos, tier));
+                  } catch (Throwable t) {
+                      LOG.error("Rail Nuke: could not plan network", t);
+                  }
+              }
+
+              @SubscribeEvent
+              public static void tick(ServerTickEvent.Post e) {
+                  Plan p = QUEUE.peek();
+                  if (p == null) return;
+                  if (p.wait > 0) { p.wait--; return; }
+                  int budget = Config.BUDGET.get();
+                  while (budget > 0 && !p.steps.isEmpty()) {
+                      Plan.Step s = p.steps.pollFirst();
+                      try {
+                          s.run().run();
+                      } catch (Throwable t) {
+                          LOG.warn("Rail Nuke step failed (skipped): {}", t.toString());
+                      }
+                      budget -= Math.max(1, s.cost());
+                      if (s.waitAfter() > 0) { p.wait = s.waitAfter(); break; }
+                  }
+                  if (p.steps.isEmpty()) QUEUE.poll();
+              }
+
+              @SubscribeEvent
+              public static void stopping(ServerStoppingEvent e) {
+                  QUEUE.clear();
+              }
+          }
+          EOF
+
+          cat > $J/Schematics.java <<'EOF'
+          package com.railnuke;
+
+          import net.minecraft.nbt.CompoundTag;
+          import net.minecraft.nbt.ListTag;
+          import net.minecraft.nbt.NbtAccounter;
+          import net.minecraft.nbt.NbtIo;
+          import net.neoforged.fml.loading.FMLPaths;
+
+          import java.io.InputStream;
+          import java.nio.file.Files;
+          import java.nio.file.Path;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.stream.Stream;
+
+          /** Finds Create schematics (.nbt) in the game's schematics folder and classifies the ones that are trains. */
+          final class Schematics {
+              record Info(String file, Plan.Kind kind, CompoundTag tag, List<int[]> bogeys, boolean axisX) {}
+
+              private Schematics() {}
+
+              static List<Info> scan() {
+                  List<Info> out = new ArrayList<>();
+                  Path root = FMLPaths.GAMEDIR.get().resolve("schematics");
+                  if (!Files.isDirectory(root)) return out;
+                  try (Stream<Path> w = Files.walk(root, 4)) {
+                      w.filter(p -> p.toString().endsWith(".nbt")).forEach(p -> {
+                          Info i = analyse(p);
+                          if (i != null) out.add(i);
+                      });
+                  } catch (Exception e) {
+                      Jobs.LOG.warn("Rail Nuke: schematic scan failed: {}", e.toString());
+                  }
+                  return out;
+              }
+
+              private static Info analyse(Path p) {
+                  try (InputStream in = Files.newInputStream(p)) {
+                      CompoundTag tag = NbtIo.readCompressed(in, NbtAccounter.unlimitedHeap());
+                      if (!tag.contains("palette", 9) || !tag.contains("blocks", 9)) return null;
+                      ListTag pal = tag.getList("palette", 10);
+                      String[] names = new String[pal.size()];
+                      for (int i = 0; i < names.length; i++) names[i] = pal.getCompound(i).getString("Name");
+                      ListTag blocks = tag.getList("blocks", 10);
+                      ListTag kept = new ListTag();
+                      List<int[]> bogeys = new ArrayList<>();
+                      int controls = 0, seats = 0, cargo = 0, fluid = 0;
+                      for (int i = 0; i < blocks.size(); i++) {
+                          CompoundTag b = blocks.getCompound(i);
+                          int st = b.getInt("state");
+                          if (st < 0 || st >= names.length) continue;
+                          String n = names[st];
+                          String path = n.contains(":") ? n.substring(n.indexOf(':') + 1) : n;
+                          if (path.contains("track")) continue; // tracks are dropped, ours are already there
+                          kept.add(b);
+                          ListTag pos = b.getList("pos", 3);
+                          if (path.contains("bogey")) bogeys.add(new int[]{pos.getInt(0), pos.getInt(1), pos.getInt(2)});
+                          else if (path.equals("controls") || path.endsWith("_controls")) controls++;
+                          else if (path.endsWith("_seat") || path.equals("seat")) seats++;
+                          else if (path.contains("fluid") || path.contains("tank") || path.contains("pump")) fluid++;
+                          else if (path.contains("item_vault") || path.contains("item_hatch") || path.contains("cargo") || path.contains("storage_interface")) cargo++;
+                      }
+                      // needs controls + bogies + a seat, and enough bogies for at least the minimum number of carriages
+                      if (controls == 0 || seats == 0) return null;
+                      if (bogeys.size() < Math.max(2, Config.MIN_CARRIAGES.get()) || bogeys.size() > Config.MAX_CARRIAGES.get() * 2) return null;
+                      int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
+                      for (int[] b : bogeys) {
+                          minX = Math.min(minX, b[0]); maxX = Math.max(maxX, b[0]);
+                          minZ = Math.min(minZ, b[2]); maxZ = Math.max(maxZ, b[2]);
+                      }
+                      boolean axisX = (maxX - minX) >= (maxZ - minZ);
+                      ListTag size = tag.getList("size", 3);
+                      if (size.size() == 3 && (axisX ? size.getInt(0) : size.getInt(2)) > 62) return null;
+                      tag.put("blocks", kept);
+                      Plan.Kind kind = cargo > 0 ? Plan.Kind.CARGO : fluid > 0 ? Plan.Kind.FLUID : Plan.Kind.PASSENGER;
+                      return new Info(p.getFileName().toString(), kind, tag, bogeys, axisX);
+                  } catch (Exception e) {
+                      return null;
+                  }
+              }
+          }
+          EOF
+
+          cat > $J/TrainSpawner.java <<'EOF'
+          package com.railnuke;
+
+          import com.simibubi.create.Create;
+          import com.simibubi.create.content.trains.entity.Carriage;
+          import com.simibubi.create.content.trains.entity.CarriageContraption;
+          import com.simibubi.create.content.trains.entity.Train;
+          import com.simibubi.create.content.trains.schedule.Schedule;
+          import com.simibubi.create.content.trains.station.GlobalStation;
+          import com.simibubi.create.content.trains.station.StationBlockEntity;
+          import net.minecraft.core.BlockPos;
+          import net.minecraft.core.Direction;
+          import net.minecraft.core.registries.Registries;
+          import net.minecraft.nbt.CompoundTag;
+          import net.minecraft.nbt.ListTag;
+          import net.minecraft.network.chat.Component;
+          import net.minecraft.server.level.ServerLevel;
+          import net.minecraft.world.entity.Entity;
+          import net.minecraft.world.level.block.Blocks;
+          import net.minecraft.world.level.block.Rotation;
+          import net.minecraft.world.level.levelgen.structure.BoundingBox;
+          import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+          import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
+
+          import java.util.List;
+          import java.util.UUID;
+
+          /** Places a schematic train on a station platform, assembles it, gives it a schedule and seats NPC conductors. */
+          final class TrainSpawner {
+              static final String[] NAMES = {"RailFan_Steve", "Alex", "Casey", "DieselDan", "MaggieMae", "SteamSally", "Jonesy", "TrackTom",
+                      "Pixel_Pete", "ConductorKai", "Rory", "Zuri", "Ari", "Efe", "Noor", "Sunny", "Makena", "BigJoe", "Willow", "Ned", "Cleo", "Rusty", "Dot", "Gus"};
+
+              private TrainSpawner() {}
+
+              static void spawn(ServerLevel lv, Plan.Slot s, List<String> dests) {
+                  BoundingBox box = null;
+                  try {
+                      Schematics.Info info = s.schem();
+                      StructureTemplate t = new StructureTemplate();
+                      t.load(lv.holderLookup(Registries.BLOCK), info.tag());
+                      Direction ext = Config.ASSEMBLE_AHEAD.get() ? s.dir() : s.dir().getOpposite();
+                      boolean extX = ext.getAxis() == Direction.Axis.X;
+                      Rotation rot = info.axisX() == extX ? Rotation.NONE : Rotation.CLOCKWISE_90;
+                      StructurePlaceSettings ps = new StructurePlaceSettings().setRotation(rot).setIgnoreEntities(true);
+
+                      BlockPos anchor = BlockPos.ZERO;
+                      int best = Integer.MAX_VALUE;
+                      for (int[] b : info.bogeys()) {
+                          BlockPos tp = StructureTemplate.calculateRelativePosition(ps, new BlockPos(b[0], b[1], b[2]));
+                          int c = ext.getStepX() * tp.getX() + ext.getStepZ() * tp.getZ();
+                          if (c < best) { best = c; anchor = tp; }
+                      }
+                      BlockPos org = s.track().above().subtract(anchor);
+                      t.placeInWorld(lv, org, org, ps, lv.getRandom(), 3);
+                      box = t.getBoundingBox(ps, org);
+
+                      if (!(lv.getBlockEntity(s.station()) instanceof StationBlockEntity sbe)) { clean(lv, box, s); return; }
+                      sbe.tryEnterAssemblyMode();
+                      sbe.assemble(UUID.randomUUID());
+                      GlobalStation gs = sbe.getStation();
+                      Train train = gs == null ? null : gs.getPresentTrain();
+                      if (train == null) { clean(lv, box, s); return; }
+
+                      int n = train.carriages.size();
+                      if (n < Config.MIN_CARRIAGES.get() || n > Config.MAX_CARRIAGES.get()) {
+                          // no wagons attached (or too many) -> this train does not spawn
+                          Create.RAILWAYS.removeTrain(train.id);
+                          for (Carriage c : train.carriages) c.forEachPresentEntity(Entity::discard);
+                          return;
+                      }
+
+                      train.name = Component.literal(s.kind().label + " Express " + s.name().substring(s.name().length() - 1));
+
+                      // schedule: cyclic list of every station of this train's kind
+                      ListTag entries = new ListTag();
+                      for (String d : dests) {
+                          CompoundTag e = new CompoundTag();
+                          CompoundTag ins = new CompoundTag();
+                          ins.putString("Id", "create:destination");
+                          CompoundTag data = new CompoundTag();
+                          data.putString("Text", d);
+                          ins.put("Data", data);
+                          e.put("Instruction", ins);
+                          ListTag conds = new ListTag();
+                          ListTag and = new ListTag();
+                          CompoundTag c = new CompoundTag();
+                          c.putString("Id", "create:delay");
+                          CompoundTag cd = new CompoundTag();
+                          cd.putInt("Value", 15);
+                          cd.putInt("TimeUnit", 1);
+                          c.put("Data", cd);
+                          and.add(c);
+                          conds.add(and);
+                          e.put("Conditions", conds);
+                          entries.add(e);
+                      }
+                      CompoundTag st = new CompoundTag();
+                      st.put("Entries", entries);
+                      st.putBoolean("Cyclic", true);
+                      Schedule sch = Schedule.fromTag(lv.registryAccess(), st);
+                      train.runtime.setSchedule(sch, false);
+
+                      // NPC conductors on the conductor seats
+                      for (Carriage c : train.carriages) {
+                          c.forEachPresentEntity(cce -> {
+                              if (!(cce.getContraption() instanceof CarriageContraption cc)) return;
+                              for (BlockPos seat : cc.conductorSeats.keySet()) {
+                                  int idx = cc.getSeats().indexOf(seat);
+                                  if (idx < 0) continue;
+                                  ConductorEntity ce = RailNuke.CONDUCTOR.get().create(lv);
+                                  if (ce == null) continue;
+                                  ce.setPos(cce.position());
+                                  ce.setSkin(lv.random.nextInt(9));
+                                  ce.setCustomName(Component.literal(NAMES[lv.random.nextInt(NAMES.length)]));
+                                  ce.setCustomNameVisible(true);
+                                  lv.addFreshEntity(ce);
+                                  cce.addSittingPassenger(ce, idx);
+                              }
+                          });
+                      }
+                  } catch (Throwable e) {
+                      Jobs.LOG.warn("Rail Nuke: train spawn failed at {}: {}", s.name(), e.toString());
+                      if (box != null) clean(lv, box, s);
+                  }
+              }
+
+              private static void clean(ServerLevel lv, BoundingBox box, Plan.Slot s) {
+                  for (BlockPos p : BlockPos.betweenClosed(box.minX(), s.track().getY() + 1, box.minZ(), box.maxX(), box.maxY(), box.maxZ())) {
+                      if (!lv.getBlockState(p).isAir()) lv.setBlock(p, Blocks.AIR.defaultBlockState(), 2 | 16);
+                  }
+              }
+          }
+          EOF
+
+          cat > $J/Plan.java <<'EOF'
+          package com.railnuke;
+
+          import com.simibubi.create.AllBlocks;
+          import com.simibubi.create.AllDataComponents;
+          import com.simibubi.create.content.trains.station.StationBlockEntity;
+          import com.simibubi.create.content.trains.track.BezierConnection;
+          import com.simibubi.create.content.trains.track.TrackBlock;
+          import com.simibubi.create.content.trains.track.TrackBlockEntity;
+          import com.simibubi.create.content.trains.track.TrackShape;
+          import net.createmod.catnip.data.Couple;
+          import net.minecraft.core.BlockPos;
+          import net.minecraft.core.Direction;
+          import net.minecraft.network.chat.Component;
+          import net.minecraft.server.level.ServerLevel;
+          import net.minecraft.tags.BlockTags;
+          import net.minecraft.util.RandomSource;
+          import net.minecraft.world.InteractionHand;
+          import net.minecraft.world.item.ItemStack;
+          import net.minecraft.world.item.context.UseOnContext;
+          import net.minecraft.world.level.block.Blocks;
+          import net.minecraft.world.level.block.state.BlockState;
+          import net.minecraft.world.phys.BlockHitResult;
+          import net.minecraft.world.phys.Vec3;
+          import net.neoforged.neoforge.common.util.FakePlayer;
+          import net.neoforged.neoforge.common.util.FakePlayerFactory;
+
+          import java.util.*;
+
+          /**
+           * One explosion = one Plan: a list of small build steps (tracks, curves, platforms, stations, signals, trains)
+           * that Jobs executes a few per tick.
+           */
+          final class Plan {
+              enum Kind {
+                  PASSENGER("Passenger"), CARGO("Cargo"), FLUID("Fluid");
+                  final String label;
+                  Kind(String l) { label = l; }
+              }
+
+              record Step(Runnable run, int cost, int waitAfter) {}
+              record Curve(BlockPos a, Direction aOut, BlockPos b, Direction bOut) {}
+              record Side(BlockPos start, Direction dir, int len) {}
+              record Sig(BlockPos track, Direction dir, Direction side) {}
+              record Slot(BlockPos track, Direction dir, Direction side, Kind kind, String name, Schematics.Info schem) {
+                  BlockPos station() { return track.relative(side, 3).above(); }
+              }
+
+              final ServerLevel level;
+              final Deque<Step> steps = new ArrayDeque<>();
+              int wait;
+
+              private final int y, ox, oz;
+              private final Map<BlockPos, Direction.Axis> tracks = new LinkedHashMap<>();
+              private final Set<BlockPos> be = new HashSet<>();
+              private final List<Curve> curves = new ArrayList<>();
+              private final List<Slot> slots = new ArrayList<>();
+              private final List<Sig> sigs = new ArrayList<>();
+              private final List<Schematics.Info> pool;
+              private final Map<Kind, Integer> counts = new EnumMap<>(Kind.class);
+              private final RandomSource rnd = RandomSource.create();
+
+              Plan(ServerLevel level, BlockPos o, int tier) {
+                  this.level = level;
+                  this.y = o.getY();
+                  this.ox = o.getX();
+                  this.oz = o.getZ();
+                  this.pool = Config.SPAWN_TRAINS.get() ? Schematics.scan() : List.of();
+                  switch (tier) {
+                      case 1 -> tier1();
+                      case 2 -> tier2();
+                      default -> tier3();
+                  }
+                  finish();
+              }
+
+              // ------------------------------------------------------------------ layouts
+
+              /** Type 1: toy-train oval, one station, exactly one AI train. */
+              private void tier1() {
+                  List<Side> s = ring(92, 56, 8);
+                  slot(s.get(0), 62, null, true);
+              }
+
+              /** Type 2: regional network: ring + 2 branch loops (cargo, fluid) + 4 passenger stations + signals = 6 trains. */
+              private void tier2() {
+                  List<Side> s = ring(180, 110, 8);
+                  loop(s.get(0), 4, Kind.CARGO);
+                  slot(s.get(0), 152, Kind.PASSENGER, false);
+                  slot(s.get(1), 64, Kind.PASSENGER, false);
+                  loop(s.get(2), 4, Kind.FLUID);
+                  slot(s.get(2), 152, Kind.PASSENGER, false);
+                  slot(s.get(3), 64, Kind.PASSENGER, false);
+                  for (Side sd : s) signal(sd);
+              }
+
+              /** Type 3: grand network: bigger ring, 6 branch loops, 4 main stations, signals = 10 trains. */
+              private void tier3() {
+                  List<Side> s = ring(300, 180, 10);
+                  loop(s.get(0), 4, Kind.CARGO);
+                  loop(s.get(0), 106, Kind.FLUID);
+                  slot(s.get(0), 270, Kind.PASSENGER, false);
+                  loop(s.get(1), 4, Kind.CARGO);
+                  slot(s.get(1), 152, Kind.PASSENGER, false);
+                  loop(s.get(2), 4, Kind.FLUID);
+                  loop(s.get(2), 106, Kind.CARGO);
+                  slot(s.get(2), 270, Kind.PASSENGER, false);
+                  loop(s.get(3), 4, Kind.PASSENGER);
+                  slot(s.get(3), 152, Kind.PASSENGER, false);
+                  for (Side sd : s) signal(sd);
+              }
+
+              // ------------------------------------------------------------------ plan helpers
+
+              private BlockPos at(int x, int z) { return new BlockPos(ox + x, y, oz + z); }
+
+              private void straight(BlockPos from, Direction d, int n) {
+                  for (int i = 0; i <= n; i++) tracks.putIfAbsent(from.relative(d, i), d.getAxis());
+              }
+
+              private void curve(BlockPos a, Direction aOut, BlockPos b, Direction bOut) {
+                  tracks.putIfAbsent(a, aOut.getAxis());
+                  tracks.putIfAbsent(b, bOut.getAxis());
+                  be.add(a);
+                  be.add(b);
+                  curves.add(new Curve(a, aOut, b, bOut));
+              }
+
+              /** Clockwise rounded-rectangle loop with 90 degree spline corners. */
+              private List<Side> ring(int w, int h, int r) {
+                  Direction[] ds = {Direction.EAST, Direction.SOUTH, Direction.WEST, Direction.NORTH};
+                  BlockPos s = at(-w / 2 + r, -h / 2);
+                  List<Side> out = new ArrayList<>();
+                  for (int i = 0; i < 4; i++) {
+                      Direction d = ds[i], n = ds[(i + 1) % 4];
+                      int len = (i % 2 == 0) ? w - 2 * r : h - 2 * r;
+                      straight(s, d, len);
+                      out.add(new Side(s, d, len));
+                      BlockPos e = s.relative(d, len);
+                      BlockPos nb = e.relative(d, r).relative(n, r);
+                      curve(e, d, nb, n.getOpposite());
+                      s = nb;
+                  }
+                  return out;
+              }
+
+              private Schematics.Info pick(Kind k) {
+                  List<Schematics.Info> l = pool.stream().filter(i -> k == null || i.kind() == k).toList();
+                  return l.isEmpty() ? null : l.get(rnd.nextInt(l.size()));
+              }
+
+              private String name(Kind k) {
+                  int n = counts.merge(k, 1, Integer::sum);
+                  return k.label + " " + (char) ('A' + n - 1);
+              }
+
+              /** Station on the main line (platform on the inner side, train spawns behind it). */
+              private void slot(Side sd, int off, Kind k, boolean anyKind) {
+                  Schematics.Info sc;
+                  if (anyKind) {
+                      sc = pick(null);
+                      k = sc != null ? sc.kind() : Kind.PASSENGER;
+                  } else {
+                      sc = pick(k);
+                  }
+                  BlockPos tr = sd.start().relative(sd.dir(), off);
+                  slots.add(new Slot(tr, sd.dir(), sd.dir().getClockWise(), k, name(k), sc));
+              }
+
+              /** Branch line: an S-curve switch off the main line, a parallel siding with a station, and an S-curve merge back. */
+              private void loop(Side sd, int off, Kind k) {
+                  Direction d = sd.dir(), s = d.getClockWise();
+                  int L = 16, W = 6, SL = 64;
+                  BlockPos p1 = sd.start().relative(d, off);
+                  BlockPos q1 = p1.relative(d, L).relative(s, W);
+                  BlockPos q2 = q1.relative(d, SL);
+                  BlockPos p2 = q2.relative(d, L).relative(s.getOpposite(), W);
+                  straight(q1, d, SL);
+                  curve(p1, d, q1, d.getOpposite());
+                  curve(q2, d, p2, d.getOpposite());
+                  slots.add(new Slot(q1.relative(d, 56), d, s, k, name(k), pick(k)));
+              }
+
+              private void signal(Side sd) {
+                  sigs.add(new Sig(sd.start().relative(sd.dir(), sd.len() - 4), sd.dir(), sd.dir().getClockWise()));
+              }
+
+              private boolean positive(Direction d) {
+                  return (d.getAxisDirection() == Direction.AxisDirection.POSITIVE) ^ Config.FLIP_STATION.get();
+              }
+
+              // ------------------------------------------------------------------ ordered steps
+
+              private void finish() {
+                  for (Map.Entry<BlockPos, Direction.Axis> e : tracks.entrySet()) {
+                      BlockPos p = e.getKey();
+                      Direction.Axis ax = e.getValue();
+                      steps.add(new Step(() -> buildTrack(p, ax), 70, 0));
+                  }
+                  steps.add(new Step(() -> {}, 0, 20));
+                  for (Curve c : curves) steps.add(new Step(() -> buildCurve(c), 6, 0));
+                  steps.add(new Step(() -> {}, 0, 30));
+                  for (Slot s : slots) {
+                      for (int i = -6; i <= 52; i += 8) {
+                          int from = i, to = Math.min(i + 7, 52);
+                          steps.add(new Step(() -> buildPlatform(s, from, to), 150, 0));
+                      }
+                  }
+                  steps.add(new Step(() -> {}, 0, 10));
+                  for (Slot s : slots) steps.add(new Step(() -> buildStation(s), 10, 0));
+                  for (Sig g : sigs) steps.add(new Step(() -> buildSignal(g), 10, 0));
+                  steps.add(new Step(() -> {}, 0, 60));
+                  for (Slot s : slots) {
+                      if (s.schem() == null) continue;
+                      List<String> all = slots.stream().filter(o -> o.kind() == s.kind()).map(Slot::name).toList();
+                      int i = all.indexOf(s.name());
+                      List<String> dest = new ArrayList<>();
+                      for (int k = 1; k <= all.size(); k++) dest.add(all.get((i + k) % all.size()));
+                      steps.add(new Step(() -> TrainSpawner.spawn(level, s, dest), 20, 10));
+                  }
+                  steps.add(new Step(() -> level.getServer().getPlayerList()
+                          .broadcastSystemMessage(Component.literal("Rail network complete!"), false), 1, 0));
+              }
+
+              // ------------------------------------------------------------------ world operations
+
+              private void clear(BlockPos q) {
+                  BlockState st = level.getBlockState(q);
+                  if (st.isAir() || st.getDestroySpeed(level, q) < 0 || st.getBlock() instanceof TrackBlock) return;
+                  level.setBlock(q, Blocks.AIR.defaultBlockState(), 2 | 16);
+              }
+
+              private boolean fillable(BlockPos q) {
+                  BlockState st = level.getBlockState(q);
+                  return st.isAir() || st.canBeReplaced() || !st.getFluidState().isEmpty() || st.is(BlockTags.LEAVES);
+              }
+
+              private void buildTrack(BlockPos p, Direction.Axis ax) {
+                  Direction lat = ax == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
+                  for (int l = -4; l <= 4; l++)
+                      for (int h = 0; h <= 6; h++) {
+                          if (l == 0 && h == 0) continue;
+                          clear(p.relative(lat, l).above(h));
+                      }
+                  for (int l = -1; l <= 1; l++) {
+                      BlockPos q = p.relative(lat, l).below();
+                      if (level.getBlockState(q).getDestroySpeed(level, q) >= 0)
+                          level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
+                  }
+                  for (int k = 2; k <= 24; k++) {
+                      BlockPos q = p.below(k);
+                      if (!fillable(q)) break;
+                      level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
+                  }
+                  BlockState state = AllBlocks.TRACK.getDefaultState()
+                          .setValue(TrackBlock.SHAPE, ax == Direction.Axis.X ? TrackShape.XO : TrackShape.ZO)
+                          .setValue(TrackBlock.HAS_BE, be.contains(p));
+                  level.setBlock(p, state, 3);
+              }
+
+              private static Vec3 vec(Direction d) { return new Vec3(d.getStepX(), 0, d.getStepZ()); }
+
+              private void buildCurve(Curve c) {
+                  BlockState sa = level.getBlockState(c.a()), sb = level.getBlockState(c.b());
+                  if (!(sa.getBlock() instanceof TrackBlock ta) || !(sb.getBlock() instanceof TrackBlock tb)) return;
+                  Vec3 ax1 = vec(c.aOut()), ax2 = vec(c.bOut());
+                  Vec3 s1 = ta.getCurveStart(level, c.a(), sa, ax1), s2 = tb.getCurveStart(level, c.b(), sb, ax2);
+                  Vec3 n1 = ta.getUpNormal(level, c.a(), sa), n2 = tb.getUpNormal(level, c.b(), sb);
+                  BezierConnection bc = new BezierConnection(Couple.create(c.a(), c.b()), Couple.create(s1, s2),
+                          Couple.create(ax1, ax2), Couple.create(n1, n2), true, false, ta.getMaterial());
+                  if (level.getBlockEntity(c.a()) instanceof TrackBlockEntity t1 && level.getBlockEntity(c.b()) instanceof TrackBlockEntity t2) {
+                      t1.addConnection(bc);
+                      t2.addConnection(bc.secondary());
+                      level.scheduleTick(c.a(), ta, 1);
+                      level.scheduleTick(c.b(), tb, 1);
+                  }
+              }
+
+              private void buildPlatform(Slot s, int from, int to) {
+                  Direction back = s.dir().getOpposite();
+                  for (int i = from; i <= to; i++)
+                      for (int l = 3; l <= 5; l++) {
+                          BlockPos p = s.track().relative(back, i).relative(s.side(), l);
+                          for (int h = 1; h <= 6; h++) clear(p.above(h));
+                          level.setBlock(p, (l == 3 ? Blocks.POLISHED_ANDESITE : Blocks.SMOOTH_STONE).defaultBlockState(), 2);
+                          for (int k = 1; k <= 24; k++) {
+                              BlockPos q = p.below(k);
+                              if (!fillable(q)) break;
+                              level.setBlock(q, Blocks.STONE_BRICKS.defaultBlockState(), 2 | 16);
+                          }
+                      }
+              }
+
+              private void buildStation(Slot s) {
+                  target(AllBlocks.TRACK_STATION.asStack(), s.track(), positive(s.dir()), s.station());
+                  if (level.getBlockEntity(s.station()) instanceof StationBlockEntity sbe) sbe.updateName(s.name());
+              }
+
+              private void buildSignal(Sig g) {
+                  BlockPos support = g.track().relative(g.side(), 2);
+                  level.setBlock(support, Blocks.STONE_BRICKS.defaultBlockState(), 2);
+                  target(AllBlocks.TRACK_SIGNAL.asStack(), g.track(), positive(g.dir()), support.above());
+              }
+
+              /** Uses Create's own track-targeting item exactly like a player would (select track, then place the block). */
+              private void target(ItemStack stack, BlockPos track, boolean positive, BlockPos at) {
+                  stack.set(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS, track);
+                  stack.set(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION, positive);
+                  FakePlayer fp = FakePlayerFactory.getMinecraft(level);
+                  fp.setPos(at.getX() + 0.5, at.getY(), at.getZ() + 0.5);
+                  fp.setItemInHand(InteractionHand.MAIN_HAND, stack);
+                  BlockPos floor = at.below();
+                  BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(floor).add(0, 0.5, 0), Direction.UP, floor, false);
+                  stack.useOn(new UseOnContext(level, fp, InteractionHand.MAIN_HAND, stack, hit));
+              }
+          }
+          EOF
+
+          echo "Project generated:"; find src -type f | sort
+
+      - name: Build
+        run: gradle build --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: railnuke
+          path: build/libs/*.jar
